@@ -1,0 +1,38 @@
+services:
+
+  rabbit1:
+    image: rabbitmq:3.11.0-management
+    hostname: rabbit1
+    environment:
+      RABBITMQ_ERLANG_COOKIE: "EEHCUDCZWAJMCKWDFVVY"
+      RABBITMQ_NODENAME: rabbit1
+    volumes:
+      - "./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf"
+      - "./definitions.json:/etc/rabbitmq/definitions.json"
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  rabbit2:
+    image: rabbitmq:3.11.0-management
+    hostname: rabbit2
+    depends_on:
+      - rabbit1
+    environment:
+      RABBITMQ_ERLANG_COOKIE: "EEHCUDCZWAJMCKWDFVVY"
+      RABBITMQ_NODENAME: rabbit2
+    volumes:
+      - "./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf"
+      - "./definitions.json:/etc/rabbitmq/definitions.json"
+
+  rabbit3:
+    image: rabbitmq:3.11.0-management
+    hostname: rabbit3
+    depends_on:
+      - rabbit1
+    environment:
+      RABBITMQ_ERLANG_COOKIE: "EEHCUDCZWAJMCKWDFVVY"
+      RABBITMQ_NODENAME: rabbit3
+    volumes:
+      - "./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf"
+      - "./definitions.json:/etc/rabbitmq/definitions.json"
