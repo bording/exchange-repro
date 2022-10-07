@@ -1,44 +1,52 @@
 ﻿using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
-var maxConcurrency = Environment.ProcessorCount;
-
 var factory = new ConnectionFactory();
 
-factory.ConsumerDispatchConcurrency = maxConcurrency;
-factory.DispatchConsumersAsync = true;
-factory.UseBackgroundThreadsForIO = true;
-
-using var connection = factory.CreateConnection("main");
-using var channel = connection.CreateModel();
+using var mainConnection = factory.CreateConnection("main");
+using var mainChannel = mainConnection.CreateModel();
 
 var arguments = new Dictionary<string, object> { { "x-queue-type", "classic" } };
 //var arguments = new Dictionary<string, object> { { "x-queue-type", "quorum" } };
 
-channel.QueueDeclare("receiver", true, false, false, arguments);
+mainChannel.QueueDeclare("receiver", true, false, false, arguments);
 
-var message1 = "message1";
-var message2 = "message2";
+var message1 = "Test.ServiceBus.Messages:MessagesReceivedEvent1";
+var message2 = "Test.ServiceBus.Messages:MessagesReceivedEvent2";
+var messageBase = "Test.ServiceBus.Messages:MessageBase";
+var eventMarker = "NServiceBus:IEvent";
+var systemObject = "System:Object";
 
-channel.ExchangeDeclare(message1, ExchangeType.Fanout, true);
-channel.ExchangeDeclare(message2, ExchangeType.Fanout, true);
+mainChannel.ExchangeDeclare(message1, ExchangeType.Fanout, true);
+mainChannel.ExchangeDeclare(message2, ExchangeType.Fanout, true);
+mainChannel.ExchangeDeclare(messageBase, ExchangeType.Fanout, true);
+mainChannel.ExchangeDeclare(eventMarker, ExchangeType.Fanout, true);
+mainChannel.ExchangeDeclare(systemObject, ExchangeType.Fanout, true);
 
-var numberofSubscribers = 2;
+mainChannel.ExchangeBind(messageBase, message1, string.Empty);
+mainChannel.ExchangeBind(messageBase, message2, string.Empty);
+
+mainChannel.ExchangeBind(eventMarker, message1, string.Empty);
+mainChannel.ExchangeBind(eventMarker, message2, string.Empty);
+
+mainChannel.ExchangeBind(systemObject, messageBase, string.Empty);
+
+var numberofSubscribers = 10;
 
 for (int i = 0; i < numberofSubscribers; i++)
 {
-    var queueName = $"subscriber{i}";
+    var queueName = $"subscriber{i:D2}";
 
-    channel.QueueDeclare(queueName, true, false, false, arguments);
-    channel.ExchangeDeclare(queueName, ExchangeType.Fanout, true);
-    channel.QueueBind(queueName, queueName, string.Empty);
+    mainChannel.QueueDeclare(queueName, true, false, false, arguments);
+    mainChannel.ExchangeDeclare(queueName, ExchangeType.Fanout, true);
+    mainChannel.QueueBind(queueName, queueName, string.Empty);
 
     if (i == 0)
     {
-        channel.ExchangeBind(queueName, message1, string.Empty);
+        mainChannel.ExchangeBind(queueName, message1, string.Empty);
     }
 
-    channel.ExchangeBind(queueName, message2, string.Empty);
+    mainChannel.ExchangeBind(queueName, message2, string.Empty);
 }
 
 using var publishConnection = factory.CreateConnection("publish");
@@ -47,50 +55,35 @@ publishChannel.ConfirmSelect();
 
 for (int i = 0; i < 10_000; i++)
 {
-    var properties = channel.CreateBasicProperties();
+    var properties = publishChannel.CreateBasicProperties();
     publishChannel.BasicPublish(string.Empty, "receiver", properties, null);
 }
 
-publishChannel.WaitForConfirmsOrDie();
+publishChannel.WaitForConfirms();
 
 Console.WriteLine("Press any key to start consuming messages");
 Console.ReadKey();
 
-var prefetchCount = (ushort)(maxConcurrency * 3);
+mainChannel.BasicQos(0, 3, false);
 
-channel.BasicQos(0, prefetchCount, false);
-
-var consumer = new AsyncEventingBasicConsumer(channel);
+var consumer = new EventingBasicConsumer(mainChannel);
 consumer.Received += Consumer_Received;
 
-channel.BasicConsume("receiver", false, consumer);
+mainChannel.BasicConsume("receiver", false, consumer);
 
 Console.WriteLine("Press any key to quit");
 Console.ReadKey();
 
-Task Consumer_Received(object sender, BasicDeliverEventArgs basicDeliverEventArgs)
+void Consumer_Received(object? sender, BasicDeliverEventArgs basicDeliverEventArgs)
 {
-    var consumer = (AsyncEventingBasicConsumer)sender;
-    var channel = consumer.Model;
-
-    using var publishChannel = publishConnection.CreateModel();
-    publishChannel.ConfirmSelect();
-
-    var properties = channel.CreateBasicProperties();
-    publishChannel.BasicPublish(message1, string.Empty, properties, null);
-
-    properties = channel.CreateBasicProperties();
-    publishChannel.BasicPublish(message2, string.Empty, properties, null);
-
-    properties = channel.CreateBasicProperties();
-    publishChannel.BasicPublish(message1, string.Empty, properties, null);
-
-    properties = channel.CreateBasicProperties();
-    publishChannel.BasicPublish(message2, string.Empty, properties, null);
+    for (int i = 0; i < 2; i++)
+    {
+        var properties = publishChannel.CreateBasicProperties();
+        publishChannel.BasicPublish(message1, string.Empty, properties, null);
+        publishChannel.BasicPublish(message2, string.Empty, properties, null);
+    }
 
     publishChannel.WaitForConfirms();
 
-    channel.BasicAck(basicDeliverEventArgs.DeliveryTag, false);
-
-    return Task.CompletedTask;
+    mainChannel.BasicAck(basicDeliverEventArgs.DeliveryTag, false);
 }
